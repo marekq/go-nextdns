@@ -49,11 +49,12 @@ func check(e error) {
 // Check input arguments
 func checkInput(input_arg string) string {
 
-	match, _ := regexp.MatchString("-[0-9]{1,3}[a-z]{1}|now", input_arg)
+	// Allowed input formats: -1h, 2022-09-01 and now
+	match, _ := regexp.MatchString("-[0-9]{1,3}[a-z]{1}|now|[0-9]{4}-[0-9]{2}-[0-9]{2}", input_arg)
 
 	if !match {
 		fmt.Println("Invalid input: " + input_arg)
-		fmt.Println("Example: ./main -1h now, ./main -3d now")
+		fmt.Println("Example: ./main -1h now, ./main 2022-09-01 -1h")
 		os.Exit(1)
 	}
 
@@ -90,9 +91,9 @@ func getRequest(client http.Client, cursor string, f *os.File, start string, end
 	err3 := json.NewDecoder(res.Body).Decode(&p)
 	check(err3)
 
-	// Store max timestamp
 	var max_ts int = 0
 
+	// Loop through response records
 	for _, v := range p.Data {
 
 		// Get max_ts timestamp
