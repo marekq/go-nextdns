@@ -1,4 +1,4 @@
-module go-nextdns
+module nextdns
 
 go 1.19
 

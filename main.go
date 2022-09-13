@@ -1,19 +1,22 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/spf13/viper"
 )
 
-var nextdns_profile string
-var nextdns_api_key string
+var nextdnsProfile string
+var nextdnsApiKey string
 var count = 0
 
 // Create a struct to hold the response body
@@ -47,26 +50,60 @@ func check(e error) {
 }
 
 // Check input arguments
-func checkInput(input_arg string) string {
+func checkInput(inputArg string) string {
 
 	// Allowed input formats: -1h, 2022-09-01 and now
-	match, _ := regexp.MatchString("-[0-9]{1,3}[a-z]{1}|now|[0-9]{4}-[0-9]{2}-[0-9]{2}", input_arg)
+	match, _ := regexp.MatchString("-[0-9]{1,3}[a-z]|now|[0-9]{4}-[0-9]{2}-[0-9]{2}", inputArg)
 
 	if !match {
-		fmt.Println("Invalid input: " + input_arg)
+		fmt.Println("Invalid input: " + inputArg)
 		fmt.Println("Example: ./main -1h now, ./main 2022-09-01 -1h")
 		os.Exit(1)
 	}
 
-	return input_arg
+	return inputArg
 
+}
+
+func streamRequest(client http.Client) {
+
+	// Create a URL
+	url := "https://api.nextdns.io/profiles/" + nextdnsProfile + "/logs/stream?raw=1"
+
+	// Create HTTP GET request
+	req, err1 := http.NewRequest("GET", url, nil)
+	check(err1)
+
+	// Add API key to request header
+	req.Header = http.Header{
+		"X-Api-Key": []string{nextdnsApiKey},
+	}
+
+	// Perform request and check for errors
+	res, err2 := client.Do(req)
+	check(err2)
+
+	// Read response body
+	reader := bufio.NewReader(res.Body)
+
+	// Loop through response records
+	for {
+		line, _ := reader.ReadBytes('\n')
+
+		// Return only JSON responses
+		match, _ := regexp.Compile("timestamp")
+		if match.Match(line) {
+
+			log.Println(string(line))
+		}
+	}
 }
 
 // Get request to NextDNS API
 func getRequest(client http.Client, cursor string, f *os.File, start string, end string) (string, int) {
 
 	// Create a URL
-	url := "https://api.nextdns.io/profiles/" + nextdns_profile + "/logs?from=" + start + "&to=" + end + "&limit=1000&raw=1"
+	url := "https://api.nextdns.io/profiles/" + nextdnsProfile + "/logs?from=" + start + "&to=" + end + "&limit=1000&raw=1"
 
 	// Add optional cursor to URL
 	if cursor != "" && cursor != "empty" {
@@ -79,7 +116,7 @@ func getRequest(client http.Client, cursor string, f *os.File, start string, end
 
 	// Add API key to request header
 	req.Header = http.Header{
-		"X-Api-Key": []string{nextdns_api_key},
+		"X-Api-Key": []string{nextdnsApiKey},
 	}
 
 	// Perform request and check for errors
@@ -91,14 +128,14 @@ func getRequest(client http.Client, cursor string, f *os.File, start string, end
 	err3 := json.NewDecoder(res.Body).Decode(&p)
 	check(err3)
 
-	var max_ts int = 0
+	var maxTs = 0
 
 	// Loop through response records
 	for _, v := range p.Data {
 
 		// Get max_ts timestamp
-		if int(v.Timestamp.Unix()) > max_ts {
-			max_ts = int(v.Timestamp.Unix())
+		if int(v.Timestamp.Unix()) > maxTs {
+			maxTs = int(v.Timestamp.Unix())
 		}
 
 		// Write to file
@@ -111,8 +148,8 @@ func getRequest(client http.Client, cursor string, f *os.File, start string, end
 	}
 
 	// Return cursor and max_ts
-	return_token := p.Meta.Pagination.Cursor
-	return return_token, max_ts
+	returnToken := p.Meta.Pagination.Cursor
+	return returnToken, maxTs
 }
 
 // Main function
@@ -123,29 +160,37 @@ func main() {
 	viper.ReadInConfig()
 
 	// Set API key and profile
-	nextdns_api_key = viper.GetString("nextdns_api_key")
-	nextdns_profile = viper.GetString("nextdns_profile")
+	nextdnsApiKey = viper.GetString("nextdns_api_key")
+	nextdnsProfile = viper.GetString("nextdns_profile")
 
-	var max_ts int
-	var start_dt string
-	var end_dt string
+	var maxTs int
+	var startDt string
+	var endDt string
 
 	// Get start date from user
-	arg_len := len(os.Args[1:])
+	argLen := len(os.Args[1:])
 
-	// If no start date provided, error
-	if arg_len != 2 {
-		fmt.Println("Error: no start or end date provided")
-		fmt.Println("Example: ./main -1h now, ./main -3d now")
-		os.Exit(1)
+	// If stream argument given
+	if argLen == 1 && os.Args[1] == "stream" {
+
+		fmt.Println("streaming logs...")
+		streamRequest(http.Client{})
+
+	} else if argLen == 2 {
+
+		// If 2 arguments given, check input and get start and end date
+		startDt = checkInput(os.Args[1])
+		endDt = checkInput(os.Args[2])
+		fmt.Println("download logs - start: ", startDt, " end: ", endDt+"\n")
 
 	} else {
 
-		start_dt = checkInput(os.Args[1])
-		end_dt = checkInput(os.Args[2])
-	}
+		// If no arguments given, return error and quit
+		fmt.Println("Error: invalid input: " + strings.Join(os.Args[1:], " "))
+		fmt.Println("Example: ./main stream, ./main -1h now, ./main -3d now")
+		os.Exit(1)
 
-	fmt.Println("start: ", start_dt, " end: ", end_dt)
+	}
 
 	// Create file
 	f, err := os.Create("output.log")
@@ -159,8 +204,8 @@ func main() {
 	cursor := "empty"
 
 	for cursor != "" {
-		cursor, max_ts = getRequest(client, cursor, f, start_dt, end_dt)
-		date := time.Unix(int64(max_ts), 0)
+		cursor, maxTs = getRequest(client, cursor, f, startDt, endDt)
+		date := time.Unix(int64(maxTs), 0)
 		fmt.Printf("%v %v \n", count, date)
 	}
 
