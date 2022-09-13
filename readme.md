@@ -11,6 +11,6 @@ Follow these steps to get started:
 
 Example commands for CLI:
 
-- ./nextdns stream
-- ./nextdns -6h now
-- ./nextdns 2022-09-01 now
+- `./nextdns stream`
+- `./nextdns -6h now`
+- `./nextdns 2022-09-01 now`
