@@ -22,17 +22,26 @@ var count = 0
 // Create a struct to hold the response body
 type NextDns struct {
 	Data []struct {
-		Timestamp time.Time     `json:"timestamp"`
-		Domain    string        `json:"domain"`
-		Root      string        `json:"root"`
-		Tracker   string        `json:"tracker"`
-		Type      string        `json:"type"`
-		Dnssec    bool          `json:"dnssec"`
-		Encrypted bool          `json:"encrypted"`
-		Protocol  string        `json:"protocol"`
-		ClientIP  string        `json:"clientIp"`
-		Status    string        `json:"status"`
-		Reasons   []interface{} `json:"reasons"`
+		Timestamp time.Time `json:"timestamp"`
+		Domain    string    `json:"domain"`
+		Root      string    `json:"root"`
+		Type      string    `json:"type"`
+		Dnssec    bool      `json:"dnssec"`
+		Encrypted bool      `json:"encrypted"`
+		Protocol  string    `json:"protocol"`
+		ClientIP  string    `json:"clientIp"`
+		Client    string    `json:"client"`
+		Device    struct {
+			ID      string `json:"id"`
+			Name    string `json:"name"`
+			Model   string `json:"model"`
+			LocalIP string `json:"localIp"`
+		} `json:"device"`
+		Status  string `json:"status"`
+		Reasons []struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		} `json:"reasons"`
 	} `json:"data"`
 	Meta struct {
 		Pagination struct {
