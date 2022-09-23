@@ -14,6 +14,8 @@ Follow these steps to get started:
 - Run `go build` to build the executable locally. 
 - Finally, test using `./nextdns stream` to stream all logs.
 
+The stream and download logs are stored in your local directory. You can monitor these in realtime running 'tail -f stream-all.log' for streams. 
+
 ## Example commands for CLI:
 
 ### Stream all logs

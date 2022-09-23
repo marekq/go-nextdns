@@ -1,0 +1,6 @@
+.idea/
+go.sum
+output.log
+.env
+stream-*
+download-*

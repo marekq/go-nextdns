@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 	"os"
 	"regexp"
@@ -12,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/TylerBrock/colorjson"
 	"github.com/spf13/viper"
 )
 
@@ -66,7 +66,7 @@ func checkInput(inputArg string) string {
 
 	if !match {
 		fmt.Println("Invalid input: " + inputArg)
-		fmt.Println("Example: ./main -1h now, ./main 2022-09-01 -1h")
+		fmt.Println("Example: ./main stream, ./main download -1h now, ./main download -3d now")
 		os.Exit(1)
 	}
 
@@ -74,18 +74,19 @@ func checkInput(inputArg string) string {
 
 }
 
-func streamRequest(client http.Client, keyword string) {
-
-	if keyword == "" {
-		keyword = "timestamp"
-	}
+func streamRequest(client http.Client, f *os.File, keyword string) {
 
 	// Create URL string
 	url := "https://api.nextdns.io/profiles/" + nextdnsProfile + "/logs/stream?raw=1"
 
+	// Add optional search keyword to URL
+	if keyword != "" {
+		url += "&search=" + keyword
+	}
+
 	// Create HTTP GET request
-	req, err1 := http.NewRequest("GET", url, nil)
-	check(err1)
+	req, err := http.NewRequest("GET", url, nil)
+	check(err)
 
 	// Add API key to request header
 	req.Header = http.Header{
@@ -93,28 +94,50 @@ func streamRequest(client http.Client, keyword string) {
 	}
 
 	// Perform request and check for errors
-	res, err2 := client.Do(req)
-	check(err2)
+	res, err := client.Do(req)
+	check(err)
 
 	// Read response body
 	reader := bufio.NewReader(res.Body)
 
-	// Loop through response records
+	// Start indefinite loop through response records
 	for {
 
-		line, _ := reader.ReadBytes('\n')
+		// Read line separated by newline
+		line, err := reader.ReadBytes('\n')
+		check(err)
 
 		// Return only JSON responses
-		match, _ := regexp.Compile(keyword)
+		match, _ := regexp.Compile("timestamp")
 		if match.Match(line) {
 
-			log.Println(string(line))
+			jsonstr := string(line[6 : len(line)-1])
+
+			_, err := f.WriteString(jsonstr + ",\n")
+			check(err)
+
+			// Create color formatter with indent
+			f := colorjson.NewFormatter()
+			f.Indent = 4
+			f.RawStrings = true
+
+			// Format JSON
+			var obj map[string]interface{}
+			json.Unmarshal([]byte(string(line[6:])), &obj)
+
+			// Marshall the colorized JSON
+			s, err := f.Marshal(obj)
+			check(err)
+
+			// Print the colorized JSON
+			fmt.Println(string(s))
+
 		}
 	}
 }
 
 // Get request to NextDNS API
-func getRequest(client http.Client, cursor string, f *os.File, start string, end string) (string, int) {
+func downloadRequest(client http.Client, cursor string, f *os.File, start string, end string) (string, int) {
 
 	// Create URL string
 	url := "https://api.nextdns.io/profiles/" + nextdnsProfile + "/logs?from=" + start + "&to=" + end + "&limit=1000&raw=1"
@@ -125,8 +148,8 @@ func getRequest(client http.Client, cursor string, f *os.File, start string, end
 	}
 
 	// Create HTTP GET request
-	req, err1 := http.NewRequest("GET", url, nil)
-	check(err1)
+	req, err := http.NewRequest("GET", url, nil)
+	check(err)
 
 	// Add API key to request header
 	req.Header = http.Header{
@@ -134,33 +157,31 @@ func getRequest(client http.Client, cursor string, f *os.File, start string, end
 	}
 
 	// Perform request and check for errors
-	res, err2 := client.Do(req)
-	check(err2)
+	res, err := client.Do(req)
+	check(err)
 
 	// Decode response body into struct
 	var p NextDns
-	err3 := json.NewDecoder(res.Body).Decode(&p)
-	check(err3)
+	err1 := json.NewDecoder(res.Body).Decode(&p)
+	check(err1)
 
 	var maxTs = 0
 
 	// Loop through response records
-	for _, v := range p.Data {
+	for _, record := range p.Data {
 
 		// Get max_ts timestamp
-		if int(v.Timestamp.Unix()) > maxTs {
-			maxTs = int(v.Timestamp.Unix())
+		if int(record.Timestamp.Unix()) > maxTs {
+			maxTs = int(record.Timestamp.Unix())
 		}
 
+		// Marshal JSON
+		line, err := json.Marshal(record)
+		check(err)
+
 		// Write to file
-		v, err4 := json.Marshal(v)
-		check(err4)
-
-		_, err5 := f.Write(v)
-		check(err5)
-
-		_, err6 := f.WriteString(",\n")
-		check(err6)
+		_, err2 := f.WriteString(string(line) + ",\n")
+		check(err2)
 
 		// Increment counter
 		count++
@@ -186,27 +207,67 @@ func main() {
 	var startDt string
 	var endDt string
 
-	// Get start date from user
+	// Get argument length from input
 	argLen := len(os.Args[1:])
 
-	// If stream argument given
+	// Create HTTP client
+	client := http.Client{}
+
+	// If stream argument without keyword given
 	if argLen == 1 && os.Args[1] == "stream" {
 
-		fmt.Println("streaming logs...")
-		streamRequest(http.Client{}, "")
+		// Create file
+		f, err := os.Create("stream-all.log")
+		check(err)
+		defer f.Close()
+
+		fmt.Println("streaming logs to stream-all.log ...")
+		streamRequest(client, f, "")
 
 	} else if argLen == 2 && os.Args[1] == "stream" {
 
+		keyword := os.Args[2]
+
+		// Create file
+		f, err := os.Create("stream-" + keyword + ".log")
+		check(err)
+		defer f.Close()
+
 		// If stream and keyword argument given
-		fmt.Println("streaming logs with keyword: " + os.Args[2])
-		streamRequest(http.Client{}, os.Args[2])
+		fmt.Println("streaming logs with keyword: " + keyword + " to stream-" + keyword + ".log ...")
+		streamRequest(client, f, keyword)
 
 	} else if argLen == 3 && os.Args[1] == "download" {
 
-		// If 2 arguments given, check input and get start and end date
+		// If download, check input and get start and end date
 		startDt = checkInput(os.Args[2])
 		endDt = checkInput(os.Args[3])
+
 		fmt.Println("download logs - start: ", startDt, " end: ", endDt+"\n")
+
+		// Create file
+		f, err := os.Create("download-output.log")
+		check(err)
+		defer f.Close()
+
+		// Iterate over NextDNS API cursors
+		cursor := "empty"
+
+		// If cursor is not empty, get next cursor
+		for cursor != "" {
+
+			// Get request
+			cursor, maxTs = downloadRequest(client, cursor, f, startDt, endDt)
+
+			// Convert max_ts to date
+			date := time.Unix(int64(maxTs), 0)
+
+			// Print progress
+			fmt.Printf("%v %v \n", count, date)
+		}
+
+		// Print total number of records
+		fmt.Println("\nDone with " + strconv.Itoa(count) + " records")
 
 	} else {
 
@@ -216,24 +277,5 @@ func main() {
 		os.Exit(1)
 
 	}
-
-	// Create file
-	f, err := os.Create("output.log")
-	check(err)
-	defer f.Close()
-
-	client := http.Client{
-		Timeout: 20 * time.Second,
-	}
-
-	cursor := "empty"
-
-	for cursor != "" {
-		cursor, maxTs = getRequest(client, cursor, f, startDt, endDt)
-		date := time.Unix(int64(maxTs), 0)
-		fmt.Printf("%v %v \n", count, date)
-	}
-
-	fmt.Println("\nDone with " + strconv.Itoa(count) + " records")
 
 }
