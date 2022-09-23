@@ -19,7 +19,7 @@ var nextdnsProfile string
 var nextdnsApiKey string
 var count = 0
 
-// Create a struct to hold the response body
+// NextDns create a struct to hold the response body
 type NextDns struct {
 	Data []struct {
 		Timestamp time.Time `json:"timestamp"`
@@ -74,9 +74,13 @@ func checkInput(inputArg string) string {
 
 }
 
-func streamRequest(client http.Client) {
+func streamRequest(client http.Client, keyword string) {
 
-	// Create a URL
+	if keyword == "" {
+		keyword = "timestamp"
+	}
+
+	// Create URL string
 	url := "https://api.nextdns.io/profiles/" + nextdnsProfile + "/logs/stream?raw=1"
 
 	// Create HTTP GET request
@@ -97,10 +101,11 @@ func streamRequest(client http.Client) {
 
 	// Loop through response records
 	for {
+
 		line, _ := reader.ReadBytes('\n')
 
 		// Return only JSON responses
-		match, _ := regexp.Compile("timestamp")
+		match, _ := regexp.Compile(keyword)
 		if match.Match(line) {
 
 			log.Println(string(line))
@@ -111,7 +116,7 @@ func streamRequest(client http.Client) {
 // Get request to NextDNS API
 func getRequest(client http.Client, cursor string, f *os.File, start string, end string) (string, int) {
 
-	// Create a URL
+	// Create URL string
 	url := "https://api.nextdns.io/profiles/" + nextdnsProfile + "/logs?from=" + start + "&to=" + end + "&limit=1000&raw=1"
 
 	// Add optional cursor to URL
@@ -148,9 +153,14 @@ func getRequest(client http.Client, cursor string, f *os.File, start string, end
 		}
 
 		// Write to file
-		v, _ := json.Marshal(v)
-		f.Write(v)
-		f.WriteString(",\n")
+		v, err4 := json.Marshal(v)
+		check(err4)
+
+		_, err5 := f.Write(v)
+		check(err5)
+
+		_, err6 := f.WriteString(",\n")
+		check(err6)
 
 		// Increment counter
 		count++
@@ -183,20 +193,26 @@ func main() {
 	if argLen == 1 && os.Args[1] == "stream" {
 
 		fmt.Println("streaming logs...")
-		streamRequest(http.Client{})
+		streamRequest(http.Client{}, "")
 
-	} else if argLen == 2 {
+	} else if argLen == 2 && os.Args[1] == "stream" {
+
+		// If stream and keyword argument given
+		fmt.Println("streaming logs with keyword: " + os.Args[2])
+		streamRequest(http.Client{}, os.Args[2])
+
+	} else if argLen == 3 && os.Args[1] == "download" {
 
 		// If 2 arguments given, check input and get start and end date
-		startDt = checkInput(os.Args[1])
-		endDt = checkInput(os.Args[2])
+		startDt = checkInput(os.Args[2])
+		endDt = checkInput(os.Args[3])
 		fmt.Println("download logs - start: ", startDt, " end: ", endDt+"\n")
 
 	} else {
 
 		// If no arguments given, return error and quit
 		fmt.Println("Error: invalid input: " + strings.Join(os.Args[1:], " "))
-		fmt.Println("Example: ./main stream, ./main -1h now, ./main -3d now")
+		fmt.Println("Example: ./main stream, ./main download -1h now, ./main download -3d now")
 		os.Exit(1)
 
 	}
